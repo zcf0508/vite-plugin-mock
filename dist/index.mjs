@@ -8,7 +8,8 @@ import fg from 'fast-glob';
 import Mock from 'mockjs';
 import { pathToRegexp, match } from 'path-to-regexp';
 import { bundleRequire, JS_EXT_RE } from 'bundle-require';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'node:url';
 
 const toString = Object.prototype.toString;
 function is(val, type) {
@@ -245,7 +246,12 @@ function loggerOutput(title, msg, type = "info") {
     throw new Error("vite-plugin-vue-mock requires mockjs to be present in the dependency tree.");
   }
 })();
-const DIR_CLIENT = resolve(__dirname, "../dist/inspect");
+const DIR_CLIENT = resolve(
+  typeof __dirname !== "undefined" ? __dirname : dirname(
+    fileURLToPath(import.meta.url)
+  ),
+  "../dist/inspect"
+);
 function viteMockServe(opt = {}) {
   let isDev = false;
   let config;
@@ -275,7 +281,6 @@ function viteMockServe(opt = {}) {
             })
           )
         );
-        next();
       });
       middlewares.use("/__mockInspect/exclude", (req, res, next) => {
         const isPost = req.method && req.method.toUpperCase() === "POST";
@@ -287,8 +292,9 @@ function viteMockServe(opt = {}) {
                 excludeMock.add(url);
               });
               res.end(JSON.stringify({ code: 0 }));
+            } else {
+              next();
             }
-            next();
           });
         } else {
           next();

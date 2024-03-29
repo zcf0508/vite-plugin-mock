@@ -11,6 +11,7 @@ const Mock = require('mockjs');
 const pathToRegexp = require('path-to-regexp');
 const bundleRequire = require('bundle-require');
 const path$1 = require('path');
+const node_url = require('node:url');
 
 function _interopDefaultCompat (e) { return e && typeof e === 'object' && 'default' in e ? e.default : e; }
 
@@ -258,7 +259,12 @@ function loggerOutput(title, msg, type = "info") {
     throw new Error("vite-plugin-vue-mock requires mockjs to be present in the dependency tree.");
   }
 })();
-const DIR_CLIENT = path$1.resolve(__dirname, "../dist/inspect");
+const DIR_CLIENT = path$1.resolve(
+  typeof __dirname !== "undefined" ? __dirname : path$1.dirname(
+    node_url.fileURLToPath((typeof document === 'undefined' ? require('u' + 'rl').pathToFileURL(__filename).href : (document.currentScript && document.currentScript.src || new URL('index.cjs', document.baseURI).href)))
+  ),
+  "../dist/inspect"
+);
 function viteMockServe(opt = {}) {
   let isDev = false;
   let config;
@@ -288,7 +294,6 @@ function viteMockServe(opt = {}) {
             })
           )
         );
-        next();
       });
       middlewares.use("/__mockInspect/exclude", (req, res, next) => {
         const isPost = req.method && req.method.toUpperCase() === "POST";
@@ -300,8 +305,9 @@ function viteMockServe(opt = {}) {
                 excludeMock.add(url);
               });
               res.end(JSON.stringify({ code: 0 }));
+            } else {
+              next();
             }
-            next();
           });
         } else {
           next();
