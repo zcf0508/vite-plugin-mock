@@ -119,7 +119,7 @@ async function requestMiddleware(opt) {
           res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
         }
         res.statusCode = statusCode || 200;
-        const mockResponse = isFunction(response) ? response.bind(self)({ url: req.url, body, query, headers: req.headers }) : response;
+        const mockResponse = isFunction(response) ? await response.bind(self)({ url: req.url, body, query, headers: req.headers }) : response;
         res.end(JSON.stringify(Mock__default.mock(mockResponse)));
       }
       logger && loggerOutput("request invoke", req.url);
@@ -260,9 +260,7 @@ function loggerOutput(title, msg, type = "info") {
   }
 })();
 const DIR_CLIENT = path$1.resolve(
-  typeof __dirname !== "undefined" ? __dirname : path$1.dirname(
-    node_url.fileURLToPath((typeof document === 'undefined' ? require('u' + 'rl').pathToFileURL(__filename).href : (document.currentScript && document.currentScript.src || new URL('index.cjs', document.baseURI).href)))
-  ),
+  typeof __dirname !== "undefined" ? __dirname : path$1.dirname(node_url.fileURLToPath((typeof document === 'undefined' ? require('u' + 'rl').pathToFileURL(__filename).href : (document.currentScript && document.currentScript.src || new URL('index.cjs', document.baseURI).href)))),
   "../dist/inspect"
 );
 function viteMockServe(opt = {}) {
