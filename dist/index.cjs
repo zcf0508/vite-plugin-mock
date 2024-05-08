@@ -1,10 +1,10 @@
 'use strict';
 
+const colors = require('picocolors');
 const sirv = require('sirv');
 const path = require('node:path');
 const fs = require('node:fs');
 const chokidar = require('chokidar');
-const colors = require('picocolors');
 const url = require('url');
 const fg = require('fast-glob');
 const Mock = require('mockjs');
@@ -15,11 +15,11 @@ const node_url = require('node:url');
 
 function _interopDefaultCompat (e) { return e && typeof e === 'object' && 'default' in e ? e.default : e; }
 
+const colors__default = /*#__PURE__*/_interopDefaultCompat(colors);
 const sirv__default = /*#__PURE__*/_interopDefaultCompat(sirv);
 const path__default = /*#__PURE__*/_interopDefaultCompat(path);
 const fs__default = /*#__PURE__*/_interopDefaultCompat(fs);
 const chokidar__default = /*#__PURE__*/_interopDefaultCompat(chokidar);
-const colors__default = /*#__PURE__*/_interopDefaultCompat(colors);
 const url__default = /*#__PURE__*/_interopDefaultCompat(url);
 const fg__default = /*#__PURE__*/_interopDefaultCompat(fg);
 const Mock__default = /*#__PURE__*/_interopDefaultCompat(Mock);
@@ -274,7 +274,8 @@ function viteMockServe(opt = {}) {
       isDev = config.command === "serve";
       isDev && createMockServer(opt, config);
     },
-    configureServer: async ({ middlewares }) => {
+    configureServer: async (server) => {
+      const { middlewares } = server;
       const { enable = isDev } = opt;
       if (!enable) {
         return;
@@ -318,6 +319,15 @@ function viteMockServe(opt = {}) {
           dev: true
         })
       );
+      const host = config.server.host && config.server.host !== "0.0.0.0" ? config.server.host : "localhost";
+      const source = `${host}:${config.server.port || 5173}`;
+      const _printUrls = server.printUrls.bind(server);
+      server.printUrls = () => {
+        _printUrls();
+        console.log(
+          `  ${colors__default.green("\u279C")}  ${colors__default.bold("Mock Inspect: ")}` + colors__default.green(`${config.server.https ? "https" : "http"}://${source}/#/__mockInspect`)
+        );
+      };
     }
   };
 }

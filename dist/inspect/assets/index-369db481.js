@@ -7274,12 +7274,12 @@ function normalizeContainer(container) {
 }
 
 /*!
-  * vue-router v4.1.6
-  * (c) 2022 Eduardo San Martin Morote
+  * vue-router v4.3.2
+  * (c) 2024 Eduardo San Martin Morote
   * @license MIT
   */
 
-const isBrowser = typeof window !== 'undefined';
+const isBrowser = typeof document !== 'undefined';
 
 function isESModule(obj) {
     return obj.__esModule || obj[Symbol.toStringTag] === 'Module';
@@ -7301,6 +7301,143 @@ const noop = () => { };
  * https://github.com/microsoft/TypeScript/pull/48228
  */
 const isArray = Array.isArray;
+
+/**
+ * Encoding Rules (␣ = Space)
+ * - Path: ␣ " < > # ? { }
+ * - Query: ␣ " < > # & =
+ * - Hash: ␣ " < > `
+ *
+ * On top of that, the RFC3986 (https://tools.ietf.org/html/rfc3986#section-2.2)
+ * defines some extra characters to be encoded. Most browsers do not encode them
+ * in encodeURI https://github.com/whatwg/url/issues/369, so it may be safer to
+ * also encode `!'()*`. Leaving un-encoded only ASCII alphanumeric(`a-zA-Z0-9`)
+ * plus `-._~`. This extra safety should be applied to query by patching the
+ * string returned by encodeURIComponent encodeURI also encodes `[\]^`. `\`
+ * should be encoded to avoid ambiguity. Browsers (IE, FF, C) transform a `\`
+ * into a `/` if directly typed in. The _backtick_ (`````) should also be
+ * encoded everywhere because some browsers like FF encode it when directly
+ * written while others don't. Safari and IE don't encode ``"<>{}``` in hash.
+ */
+// const EXTRA_RESERVED_RE = /[!'()*]/g
+// const encodeReservedReplacer = (c: string) => '%' + c.charCodeAt(0).toString(16)
+const HASH_RE = /#/g; // %23
+const AMPERSAND_RE = /&/g; // %26
+const SLASH_RE = /\//g; // %2F
+const EQUAL_RE = /=/g; // %3D
+const IM_RE = /\?/g; // %3F
+const PLUS_RE = /\+/g; // %2B
+/**
+ * NOTE: It's not clear to me if we should encode the + symbol in queries, it
+ * seems to be less flexible than not doing so and I can't find out the legacy
+ * systems requiring this for regular requests like text/html. In the standard,
+ * the encoding of the plus character is only mentioned for
+ * application/x-www-form-urlencoded
+ * (https://url.spec.whatwg.org/#urlencoded-parsing) and most browsers seems lo
+ * leave the plus character as is in queries. To be more flexible, we allow the
+ * plus character on the query, but it can also be manually encoded by the user.
+ *
+ * Resources:
+ * - https://url.spec.whatwg.org/#urlencoded-parsing
+ * - https://stackoverflow.com/questions/1634271/url-encoding-the-space-character-or-20
+ */
+const ENC_BRACKET_OPEN_RE = /%5B/g; // [
+const ENC_BRACKET_CLOSE_RE = /%5D/g; // ]
+const ENC_CARET_RE = /%5E/g; // ^
+const ENC_BACKTICK_RE = /%60/g; // `
+const ENC_CURLY_OPEN_RE = /%7B/g; // {
+const ENC_PIPE_RE = /%7C/g; // |
+const ENC_CURLY_CLOSE_RE = /%7D/g; // }
+const ENC_SPACE_RE = /%20/g; // }
+/**
+ * Encode characters that need to be encoded on the path, search and hash
+ * sections of the URL.
+ *
+ * @internal
+ * @param text - string to encode
+ * @returns encoded string
+ */
+function commonEncode(text) {
+    return encodeURI('' + text)
+        .replace(ENC_PIPE_RE, '|')
+        .replace(ENC_BRACKET_OPEN_RE, '[')
+        .replace(ENC_BRACKET_CLOSE_RE, ']');
+}
+/**
+ * Encode characters that need to be encoded on the hash section of the URL.
+ *
+ * @param text - string to encode
+ * @returns encoded string
+ */
+function encodeHash(text) {
+    return commonEncode(text)
+        .replace(ENC_CURLY_OPEN_RE, '{')
+        .replace(ENC_CURLY_CLOSE_RE, '}')
+        .replace(ENC_CARET_RE, '^');
+}
+/**
+ * Encode characters that need to be encoded query values on the query
+ * section of the URL.
+ *
+ * @param text - string to encode
+ * @returns encoded string
+ */
+function encodeQueryValue(text) {
+    return (commonEncode(text)
+        // Encode the space as +, encode the + to differentiate it from the space
+        .replace(PLUS_RE, '%2B')
+        .replace(ENC_SPACE_RE, '+')
+        .replace(HASH_RE, '%23')
+        .replace(AMPERSAND_RE, '%26')
+        .replace(ENC_BACKTICK_RE, '`')
+        .replace(ENC_CURLY_OPEN_RE, '{')
+        .replace(ENC_CURLY_CLOSE_RE, '}')
+        .replace(ENC_CARET_RE, '^'));
+}
+/**
+ * Like `encodeQueryValue` but also encodes the `=` character.
+ *
+ * @param text - string to encode
+ */
+function encodeQueryKey(text) {
+    return encodeQueryValue(text).replace(EQUAL_RE, '%3D');
+}
+/**
+ * Encode characters that need to be encoded on the path section of the URL.
+ *
+ * @param text - string to encode
+ * @returns encoded string
+ */
+function encodePath(text) {
+    return commonEncode(text).replace(HASH_RE, '%23').replace(IM_RE, '%3F');
+}
+/**
+ * Encode characters that need to be encoded on the path section of the URL as a
+ * param. This function encodes everything {@link encodePath} does plus the
+ * slash (`/`) character. If `text` is `null` or `undefined`, returns an empty
+ * string instead.
+ *
+ * @param text - string to encode
+ * @returns encoded string
+ */
+function encodeParam(text) {
+    return text == null ? '' : encodePath(text).replace(SLASH_RE, '%2F');
+}
+/**
+ * Decode text using `decodeURIComponent`. Returns the original text if it
+ * fails.
+ *
+ * @param text - string to decode
+ * @returns decoded string
+ */
+function decode(text) {
+    try {
+        return decodeURIComponent('' + text);
+    }
+    catch (err) {
+    }
+    return '' + text;
+}
 
 const TRAILING_SLASH_RE = /\/$/;
 const removeTrailingSlash = (path) => path.replace(TRAILING_SLASH_RE, '');
@@ -7340,7 +7477,7 @@ function parseURL(parseQuery, location, currentLocation = '/') {
         fullPath: path + (searchString && '?') + searchString + hash,
         path,
         query,
-        hash,
+        hash: decode(hash),
     };
 }
 /**
@@ -7370,6 +7507,7 @@ function stripBase(pathname, base) {
  * pointing towards the same {@link RouteRecord} and that all `params`, `query`
  * parameters and `hash` are the same
  *
+ * @param stringifyQuery - A function that takes a query object of type LocationQueryRaw and returns a string representation of it.
  * @param a - first {@link RouteLocation}
  * @param b - second {@link RouteLocation}
  */
@@ -7437,6 +7575,12 @@ function resolveRelativePath(to, from) {
         return from;
     const fromSegments = from.split('/');
     const toSegments = to.split('/');
+    const lastToSegment = toSegments[toSegments.length - 1];
+    // make . and ./ the same (../ === .., ../../ === ../..)
+    // this is the same behavior as new URL()
+    if (lastToSegment === '..' || lastToSegment === '.') {
+        toSegments.push('');
+    }
     let position = fromSegments.length - 1;
     let toPosition;
     let segment;
@@ -7458,10 +7602,7 @@ function resolveRelativePath(to, from) {
     }
     return (fromSegments.slice(0, position).join('/') +
         '/' +
-        toSegments
-            // ensure we use at least the last element in the toSegments
-            .slice(toPosition - (toPosition === toSegments.length ? 1 : 0))
-            .join('/'));
+        toSegments.slice(toPosition).join('/'));
 }
 
 var NavigationType;
@@ -7520,8 +7661,8 @@ function getElementPosition(el, offset) {
     };
 }
 const computeScrollPosition = () => ({
-    left: window.pageXOffset,
-    top: window.pageYOffset,
+    left: window.scrollX,
+    top: window.scrollY,
 });
 function scrollToPosition(position) {
     let scrollToOptions;
@@ -7544,7 +7685,7 @@ function scrollToPosition(position) {
     if ('scrollBehavior' in document.documentElement.style)
         window.scrollTo(scrollToOptions);
     else {
-        window.scrollTo(scrollToOptions.left != null ? scrollToOptions.left : window.pageXOffset, scrollToOptions.top != null ? scrollToOptions.top : window.pageYOffset);
+        window.scrollTo(scrollToOptions.left != null ? scrollToOptions.left : window.scrollX, scrollToOptions.top != null ? scrollToOptions.top : window.scrollY);
     }
 }
 function getScrollKey(path, delta) {
@@ -7580,7 +7721,8 @@ function getSavedScrollPosition(key) {
 let createBaseLocation = () => location.protocol + '//' + location.host;
 /**
  * Creates a normalized history location from a window.location object
- * @param location -
+ * @param base - The base path
+ * @param location - The window.location object
  */
 function createCurrentLocation(base, location) {
     const { pathname, search, hash } = location;
@@ -7623,7 +7765,6 @@ function useHistoryListeners(base, historyState, currentLocation, replace) {
         else {
             replace(to);
         }
-        // console.log({ deltaFromCurrent })
         // Here we could also revert the navigation by calling history.go(-delta)
         // this listener will have to be adapted to not trigger again and to wait for the url
         // to be updated before triggering the listeners. Some kind of validation function would also
@@ -7670,7 +7811,11 @@ function useHistoryListeners(base, historyState, currentLocation, replace) {
     }
     // set up the listeners and prepare teardown callbacks
     window.addEventListener('popstate', popStateHandler);
-    window.addEventListener('beforeunload', beforeUnloadListener);
+    // TODO: could we use 'pagehide' or 'visibilitychange' instead?
+    // https://developer.chrome.com/blog/page-lifecycle-api/
+    window.addEventListener('beforeunload', beforeUnloadListener, {
+        passive: true,
+    });
     return {
         pauseListeners,
         listen,
@@ -7895,6 +8040,12 @@ var NavigationFailureType;
      */
     NavigationFailureType[NavigationFailureType["duplicated"] = 16] = "duplicated";
 })(NavigationFailureType || (NavigationFailureType = {}));
+/**
+ * Creates a typed NavigationFailure object.
+ * @internal
+ * @param type - NavigationFailureType
+ * @param params - { from, to }
+ */
 function createRouterError(type, params) {
     // keep full error messages in cjs versions
     {
@@ -8480,8 +8631,11 @@ function createRouterMatcher(routes, globalOptions) {
             // paramsFromLocation is a new object
             paramsFromLocation(currentLocation.params, 
             // only keep params that exist in the resolved location
-            // TODO: only keep optional params coming from a parent record
-            matcher.keys.filter(k => !k.optional).map(k => k.name)), 
+            // only keep optional params coming from a parent record
+            matcher.keys
+                .filter(k => !k.optional)
+                .concat(matcher.parent ? matcher.parent.keys.filter(k => k.optional) : [])
+                .map(k => k.name)), 
             // discard any existing params in the current location that do not exist here
             // #1497 this ensures better active/exact matching
             location.params &&
@@ -8489,7 +8643,7 @@ function createRouterMatcher(routes, globalOptions) {
             // throws if cannot be stringified
             path = matcher.stringify(params);
         }
-        else if ('path' in location) {
+        else if (location.path != null) {
             // no need to resolve the path with the matcher as it was provided
             // this also allows the user to control the encoding
             path = location.path;
@@ -8586,7 +8740,7 @@ function normalizeRecordProps(record) {
         // NOTE: we could also allow a function to be applied to every component.
         // Would need user feedback for use cases
         for (const name in record.components)
-            propsObject[name] = typeof props === 'boolean' ? props : props[name];
+            propsObject[name] = typeof props === 'object' ? props[name] : props;
     }
     return propsObject;
 }
@@ -8619,141 +8773,6 @@ function mergeOptions(defaults, partialOptions) {
 }
 function isRecordChildOf(record, parent) {
     return parent.children.some(child => child === record || isRecordChildOf(record, child));
-}
-
-/**
- * Encoding Rules ␣ = Space Path: ␣ " < > # ? { } Query: ␣ " < > # & = Hash: ␣ "
- * < > `
- *
- * On top of that, the RFC3986 (https://tools.ietf.org/html/rfc3986#section-2.2)
- * defines some extra characters to be encoded. Most browsers do not encode them
- * in encodeURI https://github.com/whatwg/url/issues/369, so it may be safer to
- * also encode `!'()*`. Leaving un-encoded only ASCII alphanumeric(`a-zA-Z0-9`)
- * plus `-._~`. This extra safety should be applied to query by patching the
- * string returned by encodeURIComponent encodeURI also encodes `[\]^`. `\`
- * should be encoded to avoid ambiguity. Browsers (IE, FF, C) transform a `\`
- * into a `/` if directly typed in. The _backtick_ (`````) should also be
- * encoded everywhere because some browsers like FF encode it when directly
- * written while others don't. Safari and IE don't encode ``"<>{}``` in hash.
- */
-// const EXTRA_RESERVED_RE = /[!'()*]/g
-// const encodeReservedReplacer = (c: string) => '%' + c.charCodeAt(0).toString(16)
-const HASH_RE = /#/g; // %23
-const AMPERSAND_RE = /&/g; // %26
-const SLASH_RE = /\//g; // %2F
-const EQUAL_RE = /=/g; // %3D
-const IM_RE = /\?/g; // %3F
-const PLUS_RE = /\+/g; // %2B
-/**
- * NOTE: It's not clear to me if we should encode the + symbol in queries, it
- * seems to be less flexible than not doing so and I can't find out the legacy
- * systems requiring this for regular requests like text/html. In the standard,
- * the encoding of the plus character is only mentioned for
- * application/x-www-form-urlencoded
- * (https://url.spec.whatwg.org/#urlencoded-parsing) and most browsers seems lo
- * leave the plus character as is in queries. To be more flexible, we allow the
- * plus character on the query, but it can also be manually encoded by the user.
- *
- * Resources:
- * - https://url.spec.whatwg.org/#urlencoded-parsing
- * - https://stackoverflow.com/questions/1634271/url-encoding-the-space-character-or-20
- */
-const ENC_BRACKET_OPEN_RE = /%5B/g; // [
-const ENC_BRACKET_CLOSE_RE = /%5D/g; // ]
-const ENC_CARET_RE = /%5E/g; // ^
-const ENC_BACKTICK_RE = /%60/g; // `
-const ENC_CURLY_OPEN_RE = /%7B/g; // {
-const ENC_PIPE_RE = /%7C/g; // |
-const ENC_CURLY_CLOSE_RE = /%7D/g; // }
-const ENC_SPACE_RE = /%20/g; // }
-/**
- * Encode characters that need to be encoded on the path, search and hash
- * sections of the URL.
- *
- * @internal
- * @param text - string to encode
- * @returns encoded string
- */
-function commonEncode(text) {
-    return encodeURI('' + text)
-        .replace(ENC_PIPE_RE, '|')
-        .replace(ENC_BRACKET_OPEN_RE, '[')
-        .replace(ENC_BRACKET_CLOSE_RE, ']');
-}
-/**
- * Encode characters that need to be encoded on the hash section of the URL.
- *
- * @param text - string to encode
- * @returns encoded string
- */
-function encodeHash(text) {
-    return commonEncode(text)
-        .replace(ENC_CURLY_OPEN_RE, '{')
-        .replace(ENC_CURLY_CLOSE_RE, '}')
-        .replace(ENC_CARET_RE, '^');
-}
-/**
- * Encode characters that need to be encoded query values on the query
- * section of the URL.
- *
- * @param text - string to encode
- * @returns encoded string
- */
-function encodeQueryValue(text) {
-    return (commonEncode(text)
-        // Encode the space as +, encode the + to differentiate it from the space
-        .replace(PLUS_RE, '%2B')
-        .replace(ENC_SPACE_RE, '+')
-        .replace(HASH_RE, '%23')
-        .replace(AMPERSAND_RE, '%26')
-        .replace(ENC_BACKTICK_RE, '`')
-        .replace(ENC_CURLY_OPEN_RE, '{')
-        .replace(ENC_CURLY_CLOSE_RE, '}')
-        .replace(ENC_CARET_RE, '^'));
-}
-/**
- * Like `encodeQueryValue` but also encodes the `=` character.
- *
- * @param text - string to encode
- */
-function encodeQueryKey(text) {
-    return encodeQueryValue(text).replace(EQUAL_RE, '%3D');
-}
-/**
- * Encode characters that need to be encoded on the path section of the URL.
- *
- * @param text - string to encode
- * @returns encoded string
- */
-function encodePath(text) {
-    return commonEncode(text).replace(HASH_RE, '%23').replace(IM_RE, '%3F');
-}
-/**
- * Encode characters that need to be encoded on the path section of the URL as a
- * param. This function encodes everything {@link encodePath} does plus the
- * slash (`/`) character. If `text` is `null` or `undefined`, returns an empty
- * string instead.
- *
- * @param text - string to encode
- * @returns encoded string
- */
-function encodeParam(text) {
-    return text == null ? '' : encodePath(text).replace(SLASH_RE, '%2F');
-}
-/**
- * Decode text using `decodeURIComponent`. Returns the original text if it
- * fails.
- *
- * @param text - string to decode
- * @returns decoded string
- */
-function decode(text) {
-    try {
-        return decodeURIComponent('' + text);
-    }
-    catch (err) {
-    }
-    return '' + text;
 }
 
 /**
@@ -8910,11 +8929,11 @@ function useCallbacks() {
     }
     return {
         add,
-        list: () => handlers,
+        list: () => handlers.slice(),
         reset,
     };
 }
-function guardToPromiseFn(guard, to, from, record, name) {
+function guardToPromiseFn(guard, to, from, record, name, runWithContext = fn => fn()) {
     // keep a reference to the enterCallbackArray to prevent pushing callbacks if a new navigation took place
     const enterCallbackArray = record &&
         // name is defined if record is because of the function overload
@@ -8947,14 +8966,14 @@ function guardToPromiseFn(guard, to, from, record, name) {
             }
         };
         // wrapping with Promise.resolve allows it to work with both async and sync guards
-        const guardReturn = guard.call(record && record.instances[name], to, from, next);
+        const guardReturn = runWithContext(() => guard.call(record && record.instances[name], to, from, next));
         let guardCall = Promise.resolve(guardReturn);
         if (guard.length < 3)
             guardCall = guardCall.then(next);
         guardCall.catch(err => reject(err));
     });
 }
-function extractComponentsGuards(matched, guardType, to, from) {
+function extractComponentsGuards(matched, guardType, to, from, runWithContext = fn => fn()) {
     const guards = [];
     for (const record of matched) {
         for (const name in record.components) {
@@ -8966,7 +8985,8 @@ function extractComponentsGuards(matched, guardType, to, from) {
                 // __vccOpts is added by vue-class-component and contain the regular options
                 const options = rawComponent.__vccOpts || rawComponent;
                 const guard = options[guardType];
-                guard && guards.push(guardToPromiseFn(guard, to, from, record, name));
+                guard &&
+                    guards.push(guardToPromiseFn(guard, to, from, record, name, runWithContext));
             }
             else {
                 // start requesting the chunk already
@@ -8983,7 +9003,8 @@ function extractComponentsGuards(matched, guardType, to, from) {
                     // __vccOpts is added by vue-class-component and contain the regular options
                     const options = resolvedComponent.__vccOpts || resolvedComponent;
                     const guard = options[guardType];
-                    return guard && guardToPromiseFn(guard, to, from, record, name)();
+                    return (guard &&
+                        guardToPromiseFn(guard, to, from, record, name, runWithContext)());
                 }));
             }
         }
@@ -9008,7 +9029,10 @@ function isRouteComponent(component) {
 function useLink(props) {
     const router = inject(routerKey);
     const currentRoute = inject(routeLocationKey);
-    const route = computed(() => router.resolve(unref(props.to)));
+    const route = computed(() => {
+        const to = unref(props.to);
+        return router.resolve(to);
+    });
     const activeRecordIndex = computed(() => {
         const { matched } = route.value;
         const { length } = matched;
@@ -9353,7 +9377,7 @@ function createRouter(options) {
         }
         let matcherLocation;
         // path could be relative in object as well
-        if ('path' in rawLocation) {
+        if (rawLocation.path != null) {
             matcherLocation = assign({}, rawLocation, {
                 path: parseURL(parseQuery$1, rawLocation.path, currentLocation.path).path,
             });
@@ -9368,7 +9392,7 @@ function createRouter(options) {
             }
             // pass encoded values to the matcher, so it can produce encoded path and fullPath
             matcherLocation = assign({}, rawLocation, {
-                params: encodeParams(rawLocation.params),
+                params: encodeParams(targetParams),
             });
             // current location params are decoded, we need to encode them in case the
             // matcher merges the params
@@ -9441,7 +9465,7 @@ function createRouter(options) {
                 query: to.query,
                 hash: to.hash,
                 // avoid transferring params if the redirect has a path
-                params: 'path' in newTargetLocation ? {} : to.params,
+                params: newTargetLocation.path != null ? {} : to.params,
             }, newTargetLocation);
         }
     }
@@ -9521,6 +9545,13 @@ function createRouter(options) {
         const error = checkCanceledNavigation(to, from);
         return error ? Promise.reject(error) : Promise.resolve();
     }
+    function runWithContext(fn) {
+        const app = installedApps.values().next().value;
+        // support Vue < 3.3
+        return app && typeof app.runWithContext === 'function'
+            ? app.runWithContext(fn)
+            : fn();
+    }
     // TODO: refactor the whole before guards by internally using router.beforeEach
     function navigate(to, from) {
         let guards;
@@ -9561,9 +9592,9 @@ function createRouter(options) {
             .then(() => {
             // check the route beforeEnter
             guards = [];
-            for (const record of to.matched) {
+            for (const record of enteringRecords) {
                 // do not trigger beforeEnter on reused views
-                if (record.beforeEnter && !from.matched.includes(record)) {
+                if (record.beforeEnter) {
                     if (isArray(record.beforeEnter)) {
                         for (const beforeEnter of record.beforeEnter)
                             guards.push(guardToPromiseFn(beforeEnter, to, from));
@@ -9582,7 +9613,7 @@ function createRouter(options) {
             // clear existing enterCallbacks, these are added by extractComponentsGuards
             to.matched.forEach(record => (record.enterCallbacks = {}));
             // check in-component beforeRouteEnter
-            guards = extractComponentsGuards(enteringRecords, 'beforeRouteEnter', to, from);
+            guards = extractComponentsGuards(enteringRecords, 'beforeRouteEnter', to, from, runWithContext);
             guards.push(canceledNavigationCheck);
             // run the queue of per route beforeEnter guards
             return runGuardQueue(guards);
@@ -9604,8 +9635,9 @@ function createRouter(options) {
     function triggerAfterEach(to, from, failure) {
         // navigation is confirmed, call afterGuards
         // TODO: wrap with error handlers
-        for (const guard of afterGuards.list())
-            guard(to, from, failure);
+        afterGuards
+            .list()
+            .forEach(guard => runWithContext(() => guard(to, from, failure)));
     }
     /**
      * - Cleans up any navigation guards
@@ -9725,15 +9757,16 @@ function createRouter(options) {
                 }
                 triggerAfterEach(toLocation, from, failure);
             })
+                // avoid warnings in the console about uncaught rejections, they are logged by triggerErrors
                 .catch(noop);
         });
     }
     // Initialization and Errors
     let readyHandlers = useCallbacks();
-    let errorHandlers = useCallbacks();
+    let errorListeners = useCallbacks();
     let ready;
     /**
-     * Trigger errorHandlers added via onError and throws the error as well
+     * Trigger errorListeners added via onError and throws the error as well
      *
      * @param error - error to throw
      * @param to - location we were navigating to when the error happened
@@ -9742,13 +9775,14 @@ function createRouter(options) {
      */
     function triggerError(error, to, from) {
         markAsReady(error);
-        const list = errorHandlers.list();
+        const list = errorListeners.list();
         if (list.length) {
             list.forEach(handler => handler(error, to, from));
         }
         else {
             console.error(error);
         }
+        // reject the error no matter there were error listeners or not
         return Promise.reject(error);
     }
     function isReady() {
@@ -9805,7 +9839,7 @@ function createRouter(options) {
         beforeEach: beforeGuards.add,
         beforeResolve: beforeResolveGuards.add,
         afterEach: afterGuards.add,
-        onError: errorHandlers.add,
+        onError: errorListeners.add,
         isReady,
         install(app) {
             const router = this;
@@ -9831,11 +9865,13 @@ function createRouter(options) {
             }
             const reactiveRoute = {};
             for (const key in START_LOCATION_NORMALIZED) {
-                // @ts-expect-error: the key matches
-                reactiveRoute[key] = computed(() => currentRoute.value[key]);
+                Object.defineProperty(reactiveRoute, key, {
+                    get: () => currentRoute.value[key],
+                    enumerable: true,
+                });
             }
             app.provide(routerKey, router);
-            app.provide(routeLocationKey, reactive(reactiveRoute));
+            app.provide(routeLocationKey, shallowReactive(reactiveRoute));
             app.provide(routerViewLocationKey, currentRoute);
             const unmountApp = app.unmount;
             installedApps.add(app);
@@ -9855,10 +9891,11 @@ function createRouter(options) {
             };
         },
     };
+    // TODO: type this as NavigationGuardReturn or similar instead of any
+    function runGuardQueue(guards) {
+        return guards.reduce((promise, guard) => promise.then(() => runWithContext(guard)), Promise.resolve());
+    }
     return router;
-}
-function runGuardQueue(guards) {
-    return guards.reduce((promise, guard) => promise.then(() => guard()), Promise.resolve());
 }
 function extractChangingRecords(to, from) {
     const leavingRecords = [];
@@ -9909,7 +9946,7 @@ const router = createRouter({
   routes: [
     {
       path: "/",
-      component: () => __vitePreload(() => import('./home-8e6fb18a.js'),true?["./home-8e6fb18a.js","./home-5cc2f946.css"]:void 0,import.meta.url)
+      component: () => __vitePreload(() => import('./home-858b95aa.js'),true?["./home-858b95aa.js","./home-5cc2f946.css"]:void 0,import.meta.url)
     }
   ]
 });

@@ -1,8 +1,8 @@
+import colors from 'picocolors';
 import sirv from 'sirv';
 import path from 'node:path';
 import fs from 'node:fs';
 import chokidar from 'chokidar';
-import colors from 'picocolors';
 import url from 'url';
 import fg from 'fast-glob';
 import Mock from 'mockjs';
@@ -261,7 +261,8 @@ function viteMockServe(opt = {}) {
       isDev = config.command === "serve";
       isDev && createMockServer(opt, config);
     },
-    configureServer: async ({ middlewares }) => {
+    configureServer: async (server) => {
+      const { middlewares } = server;
       const { enable = isDev } = opt;
       if (!enable) {
         return;
@@ -305,6 +306,15 @@ function viteMockServe(opt = {}) {
           dev: true
         })
       );
+      const host = config.server.host && config.server.host !== "0.0.0.0" ? config.server.host : "localhost";
+      const source = `${host}:${config.server.port || 5173}`;
+      const _printUrls = server.printUrls.bind(server);
+      server.printUrls = () => {
+        _printUrls();
+        console.log(
+          `  ${colors.green("\u279C")}  ${colors.bold("Mock Inspect: ")}` + colors.green(`${config.server.https ? "https" : "http"}://${source}/#/__mockInspect`)
+        );
+      };
     }
   };
 }
