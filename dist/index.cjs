@@ -300,8 +300,8 @@ function viteMockServe(opt = {}) {
           parseJson(req).then((body) => {
             if (body && body.urlList) {
               excludeMock.clear();
-              body.urlList.forEach((url) => {
-                excludeMock.add(url);
+              body.urlList.forEach((url2) => {
+                excludeMock.add(url2);
               });
               res.end(JSON.stringify({ code: 0 }));
             } else {
@@ -320,12 +320,12 @@ function viteMockServe(opt = {}) {
         })
       );
       const host = config.server.host && config.server.host !== "0.0.0.0" ? config.server.host : "localhost";
-      const source = `${host}:${config.server.port || 5173}`;
+      const url = `${host}:${config.server.port || 5173}`;
       const _printUrls = server.printUrls.bind(server);
       server.printUrls = () => {
         _printUrls();
         console.log(
-          `  ${colors__default.green("\u279C")}  ${colors__default.bold("Mock Inspect: ")}` + colors__default.green(`${config.server.https ? "https" : "http"}://${source}/#/__mockInspect`)
+          `  ${colors__default.green("\u279C")}  ${colors__default.bold("Mock Inspect: ")}` + colors__default.green(`${config.server.https ? "https" : "http"}://${url}/__mockInspect/#/`)
         );
       };
     }
