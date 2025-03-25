@@ -1530,7 +1530,7 @@ function nextTick(fn) {
 // Use binary-search to find a suitable position in the queue,
 // so that the queue maintains the increasing order of job's id,
 // which can prevent the job from being skipped and also can avoid repeated patching.
-function findInsertionIndex(id) {
+function findInsertionIndex$1(id) {
     // the start index should be `flushIndex + 1`
     let start = flushIndex + 1;
     let end = queue.length;
@@ -1554,7 +1554,7 @@ function queueJob(job) {
             queue.push(job);
         }
         else {
-            queue.splice(findInsertionIndex(job.id), 0, job);
+            queue.splice(findInsertionIndex$1(job.id), 0, job);
         }
         queueFlush();
     }
@@ -7274,15 +7274,31 @@ function normalizeContainer(container) {
 }
 
 /*!
-  * vue-router v4.3.2
+  * vue-router v4.5.0
   * (c) 2024 Eduardo San Martin Morote
   * @license MIT
   */
 
 const isBrowser = typeof document !== 'undefined';
 
+/**
+ * Allows differentiating lazy components from functional components and vue-class-component
+ * @internal
+ *
+ * @param component
+ */
+function isRouteComponent(component) {
+    return (typeof component === 'object' ||
+        'displayName' in component ||
+        'props' in component ||
+        '__vccOpts' in component);
+}
 function isESModule(obj) {
-    return obj.__esModule || obj[Symbol.toStringTag] === 'Module';
+    return (obj.__esModule ||
+        obj[Symbol.toStringTag] === 'Module' ||
+        // support CF with dynamic imports that do not
+        // add the Module string tag
+        (obj.default && isRouteComponent(obj.default)));
 }
 const assign = Object.assign;
 function applyToParams(fn, params) {
@@ -7604,6 +7620,33 @@ function resolveRelativePath(to, from) {
         '/' +
         toSegments.slice(toPosition).join('/'));
 }
+/**
+ * Initial route location where the router is. Can be used in navigation guards
+ * to differentiate the initial navigation.
+ *
+ * @example
+ * ```js
+ * import { START_LOCATION } from 'vue-router'
+ *
+ * router.beforeEach((to, from) => {
+ *   if (from === START_LOCATION) {
+ *     // initial navigation
+ *   }
+ * })
+ * ```
+ */
+const START_LOCATION_NORMALIZED = {
+    path: '/',
+    // TODO: could we use a symbol in the future?
+    name: undefined,
+    params: {},
+    query: {},
+    hash: '',
+    fullPath: '/',
+    matched: [],
+    meta: {},
+    redirectedFrom: undefined,
+};
 
 var NavigationType;
 (function (NavigationType) {
@@ -7990,33 +8033,6 @@ function isRouteName(name) {
     return typeof name === 'string' || typeof name === 'symbol';
 }
 
-/**
- * Initial route location where the router is. Can be used in navigation guards
- * to differentiate the initial navigation.
- *
- * @example
- * ```js
- * import { START_LOCATION } from 'vue-router'
- *
- * router.beforeEach((to, from) => {
- *   if (from === START_LOCATION) {
- *     // initial navigation
- *   }
- * })
- * ```
- */
-const START_LOCATION_NORMALIZED = {
-    path: '/',
-    name: undefined,
-    params: {},
-    query: {},
-    hash: '',
-    fullPath: '/',
-    matched: [],
-    meta: {},
-    redirectedFrom: undefined,
-};
-
 const NavigationFailureSymbol = Symbol('');
 /**
  * Enumeration with all possible types for navigation failures. Can be passed to
@@ -8162,7 +8178,7 @@ function tokensToParser(segments, extraOptions) {
     if (options.end)
         pattern += '$';
     // allow paths like /dynamic to only match dynamic or dynamic/... but not dynamic_something_else
-    else if (options.strict)
+    else if (options.strict && !pattern.endsWith('/'))
         pattern += '(?:/|$)';
     const re = new RegExp(pattern, options.sensitive ? '' : 'i');
     function parse(path) {
@@ -8496,13 +8512,14 @@ function createRouterMatcher(routes, globalOptions) {
         mainNormalizedRecord.aliasOf = originalRecord && originalRecord.record;
         const options = mergeOptions(globalOptions, record);
         // generate an array of records to correctly handle aliases
-        const normalizedRecords = [
-            mainNormalizedRecord,
-        ];
+        const normalizedRecords = [mainNormalizedRecord];
         if ('alias' in record) {
             const aliases = typeof record.alias === 'string' ? [record.alias] : record.alias;
             for (const alias of aliases) {
-                normalizedRecords.push(assign({}, mainNormalizedRecord, {
+                normalizedRecords.push(
+                // we need to normalize again to ensure the `mods` property
+                // being non enumerable
+                normalizeRouteRecord(assign({}, mainNormalizedRecord, {
                     // this allows us to hold a copy of the `components` option
                     // so that async components cache is hold on the original record
                     components: originalRecord
@@ -8515,7 +8532,7 @@ function createRouterMatcher(routes, globalOptions) {
                         : mainNormalizedRecord,
                     // the aliases are always of the same kind as the original since they
                     // are defined on the same record
-                }));
+                })));
             }
         }
         let matcher;
@@ -8545,8 +8562,14 @@ function createRouterMatcher(routes, globalOptions) {
                     originalMatcher.alias.push(matcher);
                 // remove the route if named and only for the top record (avoid in nested calls)
                 // this works because the original record is the first one
-                if (isRootAdd && record.name && !isAliasRecord(matcher))
+                if (isRootAdd && record.name && !isAliasRecord(matcher)) {
                     removeRoute(record.name);
+                }
+            }
+            // Avoid adding a record that doesn't display anything. This allows passing through records without a component to
+            // not be reached and pass through the catch all route
+            if (isMatchable(matcher)) {
+                insertMatcher(matcher);
             }
             if (mainNormalizedRecord.children) {
                 const children = mainNormalizedRecord.children;
@@ -8561,14 +8584,6 @@ function createRouterMatcher(routes, globalOptions) {
             // if (parent && isAliasRecord(originalRecord)) {
             //   parent.children.push(originalRecord)
             // }
-            // Avoid adding a record that doesn't display anything. This allows passing through records without a component to
-            // not be reached and pass through the catch all route
-            if ((matcher.record.components &&
-                Object.keys(matcher.record.components).length) ||
-                matcher.record.name ||
-                matcher.record.redirect) {
-                insertMatcher(matcher);
-            }
         }
         return originalMatcher
             ? () => {
@@ -8602,15 +8617,8 @@ function createRouterMatcher(routes, globalOptions) {
         return matchers;
     }
     function insertMatcher(matcher) {
-        let i = 0;
-        while (i < matchers.length &&
-            comparePathParserScore(matcher, matchers[i]) >= 0 &&
-            // Adding children with empty path should still appear before the parent
-            // https://github.com/vuejs/router/issues/1124
-            (matcher.record.path !== matchers[i].record.path ||
-                !isRecordChildOf(matcher, matchers[i])))
-            i++;
-        matchers.splice(i, 0, matcher);
+        const index = findInsertionIndex(matcher, matchers);
+        matchers.splice(index, 0, matcher);
         // only add the original record to the name map
         if (matcher.record.name && !isAliasRecord(matcher))
             matcherMap.set(matcher.record.name, matcher);
@@ -8689,7 +8697,18 @@ function createRouterMatcher(routes, globalOptions) {
     }
     // add initial routes
     routes.forEach(route => addRoute(route));
-    return { addRoute, resolve, removeRoute, getRoutes, getRecordMatcher };
+    function clearRoutes() {
+        matchers.length = 0;
+        matcherMap.clear();
+    }
+    return {
+        addRoute,
+        resolve,
+        removeRoute,
+        clearRoutes,
+        getRoutes,
+        getRecordMatcher,
+    };
 }
 function paramsFromLocation(params, keys) {
     const newParams = {};
@@ -8706,12 +8725,12 @@ function paramsFromLocation(params, keys) {
  * @returns the normalized version
  */
 function normalizeRouteRecord(record) {
-    return {
+    const normalized = {
         path: record.path,
         redirect: record.redirect,
         name: record.name,
         meta: record.meta || {},
-        aliasOf: undefined,
+        aliasOf: record.aliasOf,
         beforeEnter: record.beforeEnter,
         props: normalizeRecordProps(record),
         children: record.children || [],
@@ -8719,10 +8738,19 @@ function normalizeRouteRecord(record) {
         leaveGuards: new Set(),
         updateGuards: new Set(),
         enterCallbacks: {},
+        // must be declared afterwards
+        // mods: {},
         components: 'components' in record
             ? record.components || null
             : record.component && { default: record.component },
     };
+    // mods contain modules and shouldn't be copied,
+    // logged or anything. It's just used for internal
+    // advanced use cases like data loaders
+    Object.defineProperty(normalized, 'mods', {
+        value: {},
+    });
+    return normalized;
 }
 /**
  * Normalize the optional `props` in a record to always be an object similar to
@@ -8771,8 +8799,57 @@ function mergeOptions(defaults, partialOptions) {
     }
     return options;
 }
-function isRecordChildOf(record, parent) {
-    return parent.children.some(child => child === record || isRecordChildOf(record, child));
+/**
+ * Performs a binary search to find the correct insertion index for a new matcher.
+ *
+ * Matchers are primarily sorted by their score. If scores are tied then we also consider parent/child relationships,
+ * with descendants coming before ancestors. If there's still a tie, new routes are inserted after existing routes.
+ *
+ * @param matcher - new matcher to be inserted
+ * @param matchers - existing matchers
+ */
+function findInsertionIndex(matcher, matchers) {
+    // First phase: binary search based on score
+    let lower = 0;
+    let upper = matchers.length;
+    while (lower !== upper) {
+        const mid = (lower + upper) >> 1;
+        const sortOrder = comparePathParserScore(matcher, matchers[mid]);
+        if (sortOrder < 0) {
+            upper = mid;
+        }
+        else {
+            lower = mid + 1;
+        }
+    }
+    // Second phase: check for an ancestor with the same score
+    const insertionAncestor = getInsertionAncestor(matcher);
+    if (insertionAncestor) {
+        upper = matchers.lastIndexOf(insertionAncestor, upper - 1);
+    }
+    return upper;
+}
+function getInsertionAncestor(matcher) {
+    let ancestor = matcher;
+    while ((ancestor = ancestor.parent)) {
+        if (isMatchable(ancestor) &&
+            comparePathParserScore(matcher, ancestor) === 0) {
+            return ancestor;
+        }
+    }
+    return;
+}
+/**
+ * Checks if a matcher can be reachable. This means if it's possible to reach it as a route. For example, routes without
+ * a component, or name, or redirect, are just used to group other routes.
+ * @param matcher
+ * @param matcher.record record of the matcher
+ * @returns
+ */
+function isMatchable({ record }) {
+    return !!(record.name ||
+        (record.components && Object.keys(record.components).length) ||
+        record.redirect);
 }
 
 /**
@@ -8993,10 +9070,12 @@ function extractComponentsGuards(matched, guardType, to, from, runWithContext = 
                 let componentPromise = rawComponent();
                 guards.push(() => componentPromise.then(resolved => {
                     if (!resolved)
-                        return Promise.reject(new Error(`Couldn't resolve component "${name}" at "${record.path}"`));
+                        throw new Error(`Couldn't resolve component "${name}" at "${record.path}"`);
                     const resolvedComponent = isESModule(resolved)
                         ? resolved.default
                         : resolved;
+                    // keep the resolved module for plugins like data loaders
+                    record.mods[name] = resolved;
                     // replace the function with the resolved component
                     // cannot be null or undefined because we went into the for loop
                     record.components[name] = resolvedComponent;
@@ -9011,21 +9090,14 @@ function extractComponentsGuards(matched, guardType, to, from, runWithContext = 
     }
     return guards;
 }
-/**
- * Allows differentiating lazy components from functional components and vue-class-component
- * @internal
- *
- * @param component
- */
-function isRouteComponent(component) {
-    return (typeof component === 'object' ||
-        'displayName' in component ||
-        'props' in component ||
-        '__vccOpts' in component);
-}
 
 // TODO: we could allow currentRoute as a prop to expose `isActive` and
 // `isExactActive` behavior should go through an RFC
+/**
+ * Returns the internal behavior of a {@link RouterLink} without the rendering part.
+ *
+ * @param props - a `to` location and an optional `replace` flag
+ */
 function useLink(props) {
     const router = inject(routerKey);
     const currentRoute = inject(routeLocationKey);
@@ -9064,9 +9136,15 @@ function useLink(props) {
         isSameRouteLocationParams(currentRoute.params, route.value.params));
     function navigate(e = {}) {
         if (guardEvent(e)) {
-            return router[unref(props.replace) ? 'replace' : 'push'](unref(props.to)
+            const p = router[unref(props.replace) ? 'replace' : 'push'](unref(props.to)
             // avoid uncaught errors are they are logged anyway
             ).catch(noop);
+            if (props.viewTransition &&
+                typeof document !== 'undefined' &&
+                'startViewTransition' in document) {
+                document.startViewTransition(() => p);
+            }
+            return p;
         }
         return Promise.resolve();
     }
@@ -9080,6 +9158,9 @@ function useLink(props) {
         isExactActive,
         navigate,
     };
+}
+function preferSingleVNode(vnodes) {
+    return vnodes.length === 1 ? vnodes[0] : vnodes;
 }
 const RouterLinkImpl = /*#__PURE__*/ defineComponent({
     name: 'RouterLink',
@@ -9113,7 +9194,7 @@ const RouterLinkImpl = /*#__PURE__*/ defineComponent({
             [getLinkClass(props.exactActiveClass, options.linkExactActiveClass, 'router-link-exact-active')]: link.isExactActive,
         }));
         return () => {
-            const children = slots.default && slots.default(link);
+            const children = slots.default && preferSingleVNode(slots.default(link));
             return props.custom
                 ? children
                 : h('a', {
@@ -9360,6 +9441,7 @@ function createRouter(options) {
         return !!matcher.getRecordMatcher(name);
     }
     function resolve(rawLocation, currentLocation) {
+        // const resolve: Router['resolve'] = (rawLocation: RouteLocationRaw, currentLocation) => {
         // const objectLocation = routerLocationAsObject(rawLocation)
         // we create a copy to modify it later
         currentLocation = assign({}, currentLocation || currentRoute.value);
@@ -9685,7 +9767,7 @@ function createRouter(options) {
             // there could be a redirect record in history
             const shouldRedirect = handleRedirectRecord(toLocation);
             if (shouldRedirect) {
-                pushWithRedirect(assign(shouldRedirect, { replace: true }), toLocation).catch(noop);
+                pushWithRedirect(assign(shouldRedirect, { replace: true, force: true }), toLocation).catch(noop);
                 return;
             }
             pendingLocation = toLocation;
@@ -9709,7 +9791,9 @@ function createRouter(options) {
                     // navigation guard.
                     // the error is already handled by router.push we just want to avoid
                     // logging the error
-                    pushWithRedirect(error.to, toLocation
+                    pushWithRedirect(assign(locationAsObject(error.to), {
+                        force: true,
+                    }), toLocation
                     // avoid an uncaught rejection, let push call triggerError
                     )
                         .then(failure => {
@@ -9827,6 +9911,7 @@ function createRouter(options) {
         listening: true,
         addRoute,
         removeRoute,
+        clearRoutes: matcher.clearRoutes,
         hasRoute,
         getRoutes,
         resolve,
@@ -9946,7 +10031,7 @@ const router = createRouter({
   routes: [
     {
       path: "/",
-      component: () => __vitePreload(() => import('./home-858b95aa.js'),true?["./home-858b95aa.js","./home-5cc2f946.css"]:void 0,import.meta.url)
+      component: () => __vitePreload(() => import('./home-c9404b00.js'),true?["./home-c9404b00.js","./home-5cc2f946.css"]:void 0,import.meta.url)
     }
   ]
 });

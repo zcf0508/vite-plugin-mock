@@ -140,16 +140,21 @@ function createWatch(opt, config) {
 }
 function parseJson(req) {
   return new Promise((resolve) => {
-    let body = "";
-    let jsonStr = "";
+    let jsonStr = {};
+    let str = "";
     req.on("data", function(chunk) {
-      body += chunk;
+      str += chunk;
     });
-    req.on("end", function() {
+    req.on("end", () => {
       try {
-        jsonStr = JSON.parse(body);
-      } catch (err) {
-        jsonStr = "";
+        jsonStr = JSON.parse(str);
+      } catch (e) {
+        const params = new URLSearchParams(str);
+        const body = {};
+        params.forEach((value, key) => {
+          body[key] = value;
+        });
+        jsonStr = body;
       }
       resolve(jsonStr);
       return;
